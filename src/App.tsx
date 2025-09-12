@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { ShopifyProduct } from './types/shopify';
 import { fetchProducts } from './services/shopify';
 import { CatalogHeader } from './components/CatalogHeader';
@@ -50,51 +50,184 @@ export default function App() {
     }
   }, []);
 
-  // Handle URL hash for search anchors
+  // URL handling with refs to avoid infinite loops
+  const isUpdatingFromUrlRef = useRef(false);
+  const urlProductHandleRef = useRef<string | null>(null);
+
+  // Store the product handle from URL on app init
   useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash.slice(1); // Remove the # symbol
-      if (hash) {
-        setSearchTerm(decodeURIComponent(hash));
-      }
-    };
-
-    // Check hash on initial load
-    handleHashChange();
-
-    // Listen for hash changes
-    window.addEventListener('hashchange', handleHashChange);
-    
-    return () => {
-      window.removeEventListener('hashchange', handleHashChange);
-    };
+    const urlParams = new URLSearchParams(window.location.search);
+    const productHandle = urlParams.get('product');
+    if (productHandle) {
+      console.log('🚀 App initialized with product URL:', productHandle);
+      urlProductHandleRef.current = productHandle;
+    }
   }, []);
 
-  // Update URL hash when search term changes
+  // Handle browser navigation (back/forward) 
   useEffect(() => {
-    if (searchTerm) {
-      // Update URL hash without triggering a page reload
-      const newHash = `#${encodeURIComponent(searchTerm)}`;
-      if (window.location.hash !== newHash) {
-        window.history.replaceState(null, '', newHash);
+    const handlePopState = () => {
+      if (products.length === 0) return;
+      
+      isUpdatingFromUrlRef.current = true;
+      
+      const urlParams = new URLSearchParams(window.location.search);
+      const productHandle = urlParams.get('product');
+      const searchParam = urlParams.get('search');
+      
+      console.log('🏠 Navigation event - Product handle:', productHandle);
+      
+      // Handle product popup from URL
+      if (productHandle) {
+        // Try to find the product
+        let product = products.find(p => p.handle === productHandle);
+        
+        if (!product) {
+          product = products.find(p => p.handle.toLowerCase() === productHandle.toLowerCase());
+        }
+        
+        if (product) {
+          console.log('✅ Found product for navigation:', product.title);
+          setSelectedProduct(product);
+          setIsPopupOpen(true);
+        } else {
+          console.warn('❌ Product not found during navigation:', productHandle);
+        }
+      } else {
+        console.log('📖 Closing popup - no product in URL');
+        setIsPopupOpen(false);
+        setSelectedProduct(null);
       }
-    } else {
-      // Remove hash if search is empty
-      if (window.location.hash) {
-        window.history.replaceState(null, '', window.location.pathname);
-      }
+      
+      // Handle search term from URL
+      const decodedSearch = searchParam ? decodeURIComponent(searchParam) : '';
+      setSearchTerm(decodedSearch);
+      
+      // Reset flag after state updates are processed
+      setTimeout(() => {
+        isUpdatingFromUrlRef.current = false;
+      }, 0);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [products.length]);
+
+  // Simplified URL product handling - runs whenever products change
+  useEffect(() => {
+    // Skip if no products loaded yet or no product handle in URL
+    if (products.length === 0 || !urlProductHandleRef.current) return;
+    
+    // Skip if popup is already open (product already found and opened)
+    if (isPopupOpen) return;
+    
+    const productHandle = urlProductHandleRef.current;
+    console.log(`🔗 Checking for product "${productHandle}" in ${products.length} loaded products`);
+    
+    // Try to find the product with multiple matching strategies
+    let product = products.find(p => p.handle === productHandle); // Exact match
+    
+    if (!product) {
+      product = products.find(p => p.handle.toLowerCase() === productHandle.toLowerCase()); // Case-insensitive
     }
+    
+    if (!product) {
+      product = products.find(p => p.handle.includes(productHandle) || productHandle.includes(p.handle)); // Partial match
+    }
+    
+    if (product) {
+      console.log('✅ Found product from URL:', product.title, 'handle:', product.handle);
+      isUpdatingFromUrlRef.current = true;
+      setSelectedProduct(product);
+      setIsPopupOpen(true);
+      // Clear the URL product handle since we found it
+      urlProductHandleRef.current = null;
+      
+      // Reset flag after state updates
+      setTimeout(() => {
+        isUpdatingFromUrlRef.current = false;
+      }, 0);
+    } else {
+      console.warn(`❌ Product "${productHandle}" not found in ${products.length} products`);
+      console.log('📋 Available handles:', products.map(p => p.handle).slice(0, 10));
+    }
+  }, [products.length, isPopupOpen]);
+
+  // Handle search term from URL (run once when app loads)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const searchParam = urlParams.get('search');
+    
+    if (searchParam) {
+      const decodedSearch = decodeURIComponent(searchParam);
+      setSearchTerm(decodedSearch);
+      console.log('🔍 Set search term from URL:', decodedSearch);
+    }
+  }, []);
+
+  // Update URL when search term changes (only if not updating from URL)
+  useEffect(() => {
+    if (isUpdatingFromUrlRef.current) return;
+    
+    const currentParams = new URLSearchParams(window.location.search);
+    const currentSearch = currentParams.get('search');
+    
+    if (searchTerm && searchTerm !== currentSearch) {
+      currentParams.set('search', encodeURIComponent(searchTerm));
+    } else if (!searchTerm && currentSearch) {
+      currentParams.delete('search');
+    } else {
+      return; // No change needed
+    }
+    
+    const newUrl = currentParams.toString() 
+      ? `${window.location.pathname}?${currentParams.toString()}`
+      : window.location.pathname;
+      
+    window.history.replaceState(null, '', newUrl);
   }, [searchTerm]);
+
+  // Update URL when popup opens/closes (only if not updating from URL)
+  useEffect(() => {
+    if (isUpdatingFromUrlRef.current) return;
+    
+    const currentParams = new URLSearchParams(window.location.search);
+    const currentProduct = currentParams.get('product');
+    
+    if (isPopupOpen && selectedProduct) {
+      // Add product to URL when popup opens
+      if (currentProduct !== selectedProduct.handle) {
+        currentParams.set('product', selectedProduct.handle);
+        const newUrl = `${window.location.pathname}?${currentParams.toString()}`;
+        window.history.pushState({ product: selectedProduct.handle }, '', newUrl);
+      }
+    } else if (!isPopupOpen && currentProduct) {
+      // Remove product from URL when popup closes
+      currentParams.delete('product');
+      const newUrl = currentParams.toString() 
+        ? `${window.location.pathname}?${currentParams.toString()}`
+        : window.location.pathname;
+      window.history.pushState({}, '', newUrl);
+    }
+  }, [isPopupOpen, selectedProduct]);
 
   useEffect(() => {
     const loadProducts = async () => {
       try {
         setIsLoading(true);
         setError(null);
+        
+        console.log('🛍️ Loading initial products...');
+        
         // Start with fewer products for faster initial load
         const response = await fetchProducts(20); 
         const productList = response.data.products.edges.map(edge => edge.node);
         setProducts(productList);
+        
+        console.log('✅ Initial products loaded:', productList.length);
         
         // Preload first few product images for better performance
         const priorityImages = productList.slice(0, 4)
@@ -113,15 +246,18 @@ export default function App() {
         // Lazy load additional products in background for better filtering
         setTimeout(async () => {
           try {
+            console.log('🔄 Loading additional products...');
             const additionalResponse = await fetchProducts(50);
             const allProductsList = additionalResponse.data.products.edges.map(edge => edge.node);
             setProducts(allProductsList);
+            console.log('✅ All products loaded:', allProductsList.length);
           } catch (error) {
             console.debug('Failed to load additional products:', error);
           }
         }, 500);
         
       } catch (err) {
+        console.error('❌ Failed to load products:', err);
         setError(err instanceof Error ? err.message : 'Failed to load products');
       } finally {
         setIsLoading(false);
@@ -290,13 +426,24 @@ export default function App() {
   }, [searchTerm, selectedCollection, selectedVendor, selectedDateSort]);
 
   const handleProductClick = (product: ShopifyProduct) => {
+    // URL will be updated by the useEffect that watches isPopupOpen/selectedProduct
     setSelectedProduct(product);
     setIsPopupOpen(true);
   };
 
   const handleClosePopup = () => {
-    setIsPopupOpen(false);
-    setSelectedProduct(null);
+    // Check if we need to navigate back or just close
+    const currentParams = new URLSearchParams(window.location.search);
+    const hasProductInUrl = currentParams.has('product');
+    
+    if (hasProductInUrl) {
+      // Use browser back navigation to properly handle history
+      window.history.back();
+    } else {
+      // Direct close without URL change
+      setIsPopupOpen(false);
+      setSelectedProduct(null);
+    }
   };
 
   return (

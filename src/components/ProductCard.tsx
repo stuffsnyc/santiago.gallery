@@ -19,7 +19,7 @@ export function ProductCard({ product, onClick }: ProductCardProps) {
             <ImageWithFallback
               src={firstImage.url}
               alt={firstImage.altText || product.title}
-              className="w-full aspect-[2/3] object-cover transition-transform duration-300 hover:scale-105"
+              className="w-full aspect-[2/3] object-cover"
               optimizationOptions={{
                 width: 400,
                 height: 600,

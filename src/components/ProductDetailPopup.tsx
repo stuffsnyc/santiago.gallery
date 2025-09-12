@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ShopifyProduct } from '../types/shopify';
-import { X, ChevronLeft, ChevronRight, ShoppingCart, Plus, ChevronUp, ChevronDown, MapPin } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ShoppingCart, Plus, ChevronUp, ChevronDown, MapPin, Share2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
@@ -8,6 +8,8 @@ import { ImageWithFallback } from './figma/ImageWithFallback';
 import { SpotifyMiniPlayer } from './SpotifyMiniPlayer';
 import { GalaxyImageWrapper } from './GalaxyImageWrapper';
 import { fetchProductsByCollections } from '../services/shopify';
+import { createShareableProductUrl } from '../utils/urlUtils';
+import { toast } from 'sonner';
 
 interface ProductDetailPopupProps {
   product: ShopifyProduct;
@@ -35,6 +37,11 @@ export function ProductDetailPopup({ product, allProducts, isOpen, onClose }: Pr
   
   // Scroll-to-close ref for mobile
   const dialogContentRef = useRef<HTMLDivElement>(null);
+  
+  // Ref to track if we're currently loading related products
+  const loadingRelatedRef = useRef(false);
+
+
 
   // Haptic feedback utility
   const triggerHapticFeedback = useCallback((pattern: number | number[] = 50) => {
@@ -51,8 +58,9 @@ export function ProductDetailPopup({ product, allProducts, isOpen, onClose }: Pr
   // Load related products when popup opens
   useEffect(() => {
     const loadRelatedProducts = async () => {
-      if (!isOpen) return;
+      if (!isOpen || loadingRelatedRef.current) return;
       
+      loadingRelatedRef.current = true;
       setIsLoadingRelated(true);
       
       try {
@@ -122,11 +130,12 @@ export function ProductDetailPopup({ product, allProducts, isOpen, onClose }: Pr
         setRelatedProducts(localRelated);
       } finally {
         setIsLoadingRelated(false);
+        loadingRelatedRef.current = false;
       }
     };
 
     loadRelatedProducts();
-  }, [isOpen, product.id, allProducts]);
+  }, [isOpen, product.id, allProducts.length]); // Use allProducts.length instead of full array
 
   // Memoize carousel products with the loaded related products
   const carouselProducts = useMemo(() => {
@@ -338,16 +347,59 @@ export function ProductDetailPopup({ product, allProducts, isOpen, onClose }: Pr
     }
   };
 
+  const handleShare = async () => {
+    const shareUrl = createShareableProductUrl(currentProduct.handle);
+    const shareData = {
+      title: currentProduct.title,
+      text: `Check out this product: ${currentProduct.title}`,
+      url: shareUrl
+    };
+
+    try {
+      // Try native Web Share API first (mobile)
+      if (navigator.share && navigator.canShare && navigator.canShare(shareData)) {
+        await navigator.share(shareData);
+        triggerHapticFeedback(50);
+      } else {
+        // Fallback to clipboard
+        await navigator.clipboard.writeText(shareUrl);
+        toast.success('Product link copied to clipboard!');
+        triggerHapticFeedback(50);
+      }
+    } catch (error) {
+      // Final fallback - create temporary input to copy
+      try {
+        const tempInput = document.createElement('input');
+        tempInput.value = shareUrl;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        tempInput.setSelectionRange(0, 99999);
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+        toast.success('Product link copied to clipboard!');
+        triggerHapticFeedback(50);
+      } catch (fallbackError) {
+        toast.error('Unable to share product link');
+        console.error('Share failed:', fallbackError);
+      }
+    }
+  };
+
   // Reset when popup opens or product changes
   useEffect(() => {
-    setCurrentProduct(product);
-    setCurrentImageIndex(0);
-    setSelectedVariant('');
-    setIsPlayerMinimized(true); // Reset player to minimized state
-    setRelatedProducts([]); // Reset related products for new product
-    
-    // Scroll to the initial product position
-    if (carouselScrollRef.current) {
+    if (isOpen) {
+      setCurrentProduct(product);
+      setCurrentImageIndex(0);
+      setSelectedVariant('');
+      setIsPlayerMinimized(true); // Reset player to minimized state
+      setRelatedProducts([]); // Reset related products for new product
+      loadingRelatedRef.current = false; // Reset loading flag
+    }
+  }, [product.id, isOpen]); // Remove carouselProducts dependency to avoid infinite loop
+
+  // Handle carousel scroll position separately
+  useEffect(() => {
+    if (isOpen && carouselScrollRef.current && carouselProducts.length > 0) {
       const initialIndex = carouselProducts.findIndex(p => p.id === product.id);
       if (initialIndex >= 0) {
         const container = carouselScrollRef.current;
@@ -363,7 +415,7 @@ export function ProductDetailPopup({ product, allProducts, isOpen, onClose }: Pr
         }, 100);
       }
     }
-  }, [product.id, isOpen]); // Reset when product changes or popup opens
+  }, [isOpen, product.id, carouselProducts.length]); // Separate effect for scroll positioning
 
   // Set default variant
   useEffect(() => {
@@ -511,12 +563,21 @@ export function ProductDetailPopup({ product, allProducts, isOpen, onClose }: Pr
           <div className="flex items-center space-x-4">
             <h1 className="text-xl font-semibold text-card-foreground">{currentProduct.title}</h1>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full hover:bg-accent transition-colors text-muted-foreground hover:text-foreground text-[16px] font-normal"
-          >
-            <X className="w-[1.625rem] h-[1.625rem]" strokeWidth={3} />
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleShare}
+              className="p-2 rounded-full hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
+              title="Share product"
+            >
+              <Share2 className="w-5 h-5" />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-full hover:bg-accent transition-colors text-muted-foreground hover:text-foreground text-[16px] font-normal"
+            >
+              <X className="w-[1.625rem] h-[1.625rem]" strokeWidth={3} />
+            </button>
+          </div>
         </div>
 
         {/* Carousel Container */}

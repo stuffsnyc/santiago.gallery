@@ -39,6 +39,18 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Google tag (gtag.js) */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-MSHKF09KLV"></script>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.dataLayer = window.dataLayer || [];
+              function gtag(){dataLayer.push(arguments);}
+              gtag('js', new Date());
+              gtag('config', 'G-MSHKF09KLV');
+            `,
+          }}
+        />
         <link rel="icon" href="/favicon.ico" />
         <meta name="theme-color" content="#030213" />
         <meta name="color-scheme" content="light dark" />
